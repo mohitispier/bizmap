@@ -332,19 +332,26 @@ function setRadius(r) {
 }
 
 // ─── SEARCH ───────────────────────────────────────────
+// ─── UPDATED DO-SEARCH FUNCTION ───────────────────────
 async function doSearch() {
   const keyword = document.getElementById('searchInput').value.trim();
-  if (!keyword) return alert('Please enter a business type');
+  if (!keyword) return alert('Please enter a business type to search');
   if (!mapCenter) return alert('Please select a location first');
 
   isSearching = true;
+  businesses = [];
+  selectedIds.clear();
+  clearMarkers();
+  updateStats();
+  updateBizList();
+
   const searchBtn = document.getElementById('searchBtn');
   searchBtn.innerHTML = '<span class="spinner"></span>';
   searchBtn.disabled = true;
   showStatus('🔍 Searching businesses...');
 
   try {
-    // Ab 'apiKey' variable pass karne ki zarurat nahi, library script me already hai
+    // AB YE DIRECT LIBRARY CALL KAREGA (FETCH ERROR NAHI AAYEGA)
     businesses = await searchWithGoogle(keyword);
     
     const locName = document.getElementById('locationInput').value || 'area';
@@ -376,7 +383,7 @@ async function doSearch() {
 // ─── NAYA GOOGLE SEARCH FUNCTION (NO FETCH) ──────────
 async function searchWithGoogle(keyword) {
   return new Promise((resolve, reject) => {
-    // Google Places Service initialize karein
+    // Ye line direct browser se Google ko connect karegi bina kisi error ke
     const service = new google.maps.places.PlacesService(document.createElement('div'));
     
     const request = {
@@ -385,7 +392,6 @@ async function searchWithGoogle(keyword) {
       keyword: keyword
     };
 
-    // Library ka direct method use karein (No CORS error)
     service.nearbySearch(request, (results, status) => {
       if (status === google.maps.places.PlacesServiceStatus.OK) {
         resolve(results.map(p => ({
@@ -393,9 +399,6 @@ async function searchWithGoogle(keyword) {
           address: p.vicinity || '',
           category: (p.types?.[0] || keyword).replace(/_/g,' '),
           rating: p.rating || null,
-          phone: '', 
-          website: '', 
-          email: '',
           location_lat: p.geometry.location.lat(),
           location_lng: p.geometry.location.lng(),
         })));
@@ -405,7 +408,6 @@ async function searchWithGoogle(keyword) {
     });
   });
 }
-
 async function searchWithOverpass(keyword) {
   const r = currentRadius;
   const lat = mapCenter.lat, lng = mapCenter.lng;

@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BizFinder + Cold Email AI</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary: '#06b6d4',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: 'Inter', system-ui, sans-serif; }
+    #map { width: 100%; height: 100%; }
+    .leaflet-container { background: #1a1a2e; }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
+    .biz-card:hover { transform: translateY(-1px); }
+    .biz-card { transition: transform 0.15s ease; }
+    #autocomplete-list { max-height: 240px; overflow-y: auto; }
+    .spinner { border: 2px solid #333; border-top: 2px solid #06b6d4; border-radius: 50%; width: 16px; height: 16px; animation: spin 0.7s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; background: #06b6d480; color: #fff; margin-right: 4px; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+    .modal-box { background: #1e1e2e; border: 1px solid #333; border-radius: 14px; padding: 28px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; }
+    .btn { cursor: pointer; padding: 7px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; border: none; transition: all 0.15s; }
+    .btn-primary { background: #06b6d4; color: #fff; }
+    .btn-primary:hover { background: #0891b2; }
+    .btn-outline { background: transparent; color: #06b6d4; border: 1px solid #06b6d4; }
+    .btn-outline:hover { background: #06b6d420; }
+    .btn-danger { background: #ef4444; color: #fff; }
+    .btn-danger:hover { background: #dc2626; }
+    .input-field { background: #111827; border: 1px solid #374151; color: #e5e7eb; border-radius: 8px; padding: 8px 12px; font-size: 13px; outline: none; width: 100%; }
+    .input-field:focus { border-color: #06b6d4; }
+    .sidebar { width: 360px; min-width: 360px; background: #0f0f1a; border-right: 1px solid #1f2937; display: flex; flex-direction: column; height: calc(100vh - 56px); overflow: hidden; }
+    @media (max-width: 768px) {
+      .sidebar { position: fixed; left: 0; top: 56px; z-index: 100; transform: translateX(-100%); transition: transform 0.2s; height: calc(100vh - 56px); }
+      .sidebar.open { transform: translateX(0); }
+      #map-area { width: 100% !important; }
+    }
+    .star { color: #facc15; }
+    .copy-btn { cursor: pointer; font-size: 11px; color: #06b6d4; }
+    .copy-btn:hover { text-decoration: underline; }
+  </style>
+</head>
+<body class="dark bg-gray-950 text-gray-100">
+
+<!-- TOP BAR -->
+<header class="h-14 bg-gray-900 border-b border-gray-800 flex items-center px-4 gap-3 z-50 relative" style="height:56px">
+  <button onclick="toggleSidebar()" class="lg:hidden text-gray-400 hover:text-white mr-1" title="Menu">
+    <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+  </button>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+  <h1 class="font-bold text-base tracking-tight text-white">BizFinder<span style="color:#06b6d4"> + Cold Email AI</span></h1>
+  <div class="flex-1"></div>
+
+  <!-- API Key input -->
+  <div class="relative hidden sm:flex items-center gap-2">
+    <input id="apiKeyInput" type="password" placeholder="AIzaSyCocE02RAn1-EUx1jYy2kAGjVKpGLKpjMk" 
+      class="input-field text-xs" style="width:200px;padding:5px 10px"
+      oninput="saveApiKey(this.value)" />
+    <span class="text-xs text-gray-500">or use AI search</span>
+  </div>
+
+  <button id="exportBtn" onclick="exportCSV()" class="btn btn-outline text-xs" style="padding:5px 12px" title="Export CSV" disabled>
+    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="display:inline;margin-right:4px;vertical-align:middle"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    Export CSV
+  </button>
+
+  <button id="emailBtn" onclick="openEmailModal()" class="btn btn-primary text-xs hidden" style="padding:5px 12px">
+    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="display:inline;margin-right:4px;vertical-align:middle"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+    <span id="emailBtnText">Generate Emails</span>
+  </button>
+</header>
+
+<!-- MAIN LAYOUT -->
+<div class="flex" style="height:calc(100vh - 56px)">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar" id="sidebar">
+    <div class="p-4 space-y-3 flex-shrink-0">
+
+      <!-- Location search -->
+      <div class="relative">
+        <label class="text-xs text-gray-400 font-semibold mb-1 block">📍 Location</label>
+        <div class="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-lg px-3" style="height:40px">
+          <svg width="14" height="14" fill="none" stroke="#06b6d4" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input id="locationInput" type="text" placeholder="Search city or area..." 
+            class="flex-1 bg-transparent text-sm text-white outline-none placeholder-gray-500"
+            oninput="onLocationInput(this.value)" autocomplete="off" />
+          <button onclick="useMyLocation()" title="Use my location" class="text-gray-400 hover:text-cyan-400">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+          </button>
+        </div>
+        <div id="autocomplete-list" class="absolute z-50 w-full bg-gray-800 border border-gray-700 rounded-lg mt-1 hidden shadow-xl"></div>
+      </div>
+
+      <!-- Radius -->
+      <div>
+        <label class="text-xs text-gray-400 font-semibold mb-1 block">Radius</label>
+        <div class="flex gap-2">
+          <button class="btn btn-outline text-xs radius-btn" data-r="500" onclick="setRadius(500)" style="padding:4px 10px">500m</button>
+          <button class="btn btn-outline text-xs radius-btn" data-r="1000" onclick="setRadius(1000)" style="padding:4px 10px">1km</button>
+          <button class="btn btn-primary text-xs radius-btn active-radius" data-r="2000" onclick="setRadius(2000)" style="padding:4px 10px">2km</button>
+          <button class="btn btn-outline text-xs radius-btn" data-r="5000" onclick="setRadius(5000)" style="padding:4px 10px">5km</button>
+          <button class="btn btn-outline text-xs radius-btn" data-r="10000" onclick="setRadius(10000)" style="padding:4px 10px">10km</button>
+        </div>
+      </div>
+
+      <!-- Search bar -->
+      <div>
+        <label class="text-xs text-gray-400 font-semibold mb-1 block">🔍 Business Type</label>
+        <div class="flex gap-2">
+          <input id="searchInput" type="text" placeholder="e.g. restaurant, skin clinic, gym..." 
+            class="input-field flex-1" style="height:38px"
+            onkeydown="if(event.key==='Enter') doSearch()" />
+          <button onclick="doSearch()" class="btn btn-primary" style="height:38px;padding:0 14px" id="searchBtn">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Status bar -->
+      <div id="statusBar" class="hidden text-xs text-cyan-400 bg-cyan-900/20 border border-cyan-800/40 rounded-lg px-3 py-2"></div>
+
+      <!-- Stats -->
+      <div class="grid grid-cols-3 gap-2">
+        <div class="bg-gray-800 rounded-lg p-2 text-center">
+          <div id="statFound" class="text-lg font-bold text-white">0</div>
+          <div class="text-xs text-gray-400">Found</div>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-2 text-center">
+          <div id="statEmails" class="text-lg font-bold text-white">0</div>
+          <div class="text-xs text-gray-400">Emails</div>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-2 text-center">
+          <div id="statSelected" class="text-lg font-bold text-white">0</div>
+          <div class="text-xs text-gray-400">Selected</div>
+        </div>
+      </div>
+
+      <!-- Select all -->
+      <div id="selectAllBar" class="hidden flex items-center justify-between">
+        <button onclick="toggleSelectAll()" class="btn btn-outline text-xs" style="padding:4px 10px" id="selectAllBtn">Select All</button>
+        <span id="filterInfo" class="text-xs text-gray-400"></span>
+      </div>
+    </div>
+
+    <div class="border-t border-gray-800 mx-4"></div>
+
+    <!-- Business list -->
+    <div class="flex-1 overflow-y-auto px-3 py-3" id="bizList">
+      <div class="flex flex-col items-center justify-center h-full text-gray-600 gap-3">
+        <svg width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <p class="text-sm">Search for businesses to get started</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAP AREA -->
+  <div class="flex-1 relative" id="map-area">
+    <div id="map"></div>
+    <!-- Location info overlay -->
+    <div id="locationInfoBox" class="hidden absolute top-4 left-4 bg-gray-900/90 backdrop-blur border border-gray-700 rounded-xl px-4 py-3 z-10 min-w-40">
+      <div id="locationInfoName" class="font-semibold text-sm text-white"></div>
+      <div id="locationInfoSub" class="text-xs text-gray-400"></div>
+      <div id="locationInfoCount" class="text-xs text-cyan-400 mt-1"></div>
+    </div>
+  </div>
+</div>
+
+<!-- EMAIL MODAL -->
+<div id="emailModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-bold text-white">✉️ Cold Email Generator</h2>
+      <button onclick="closeEmailModal()" class="text-gray-400 hover:text-white text-xl">✕</button>
+    </div>
+
+    <div class="mb-4 space-y-2">
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">Your Product/Service</label>
+        <input id="senderProduct" type="text" placeholder="e.g. SEO services, website design..." class="input-field" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">Your Name / Company</label>
+        <input id="senderName" type="text" placeholder="e.g. John from AgencyX" class="input-field" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">Email Tone</label>
+        <select id="emailTone" class="input-field">
+          <option value="professional">Professional</option>
+          <option value="friendly">Friendly</option>
+          <option value="casual">Casual</option>
+          <option value="persuasive">Persuasive</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">Google AI API Key (Gemini) — for email generation</label>
+        <input id="geminiKey" type="password" placeholder="AIza..." class="input-field" oninput="localStorage.setItem('geminiKey',this.value)" />
+        <p class="text-xs text-gray-500 mt-1">Get free key at <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-cyan-400 underline">aistudio.google.com</a></p>
+      </div>
+    </div>
+
+    <button onclick="generateEmails()" class="btn btn-primary w-full mb-4" id="genEmailBtn">
+      ⚡ Generate Cold Emails for Selected Businesses
+    </button>
+
+    <div id="emailResults" class="space-y-4"></div>
+  </div>
+</div>
+
+<script>
+// ─── STATE ───────────────────────────────────────────
+let map, radiusCircle, markers = [];
+let businesses = [];
+let selectedIds = new Set();
+let currentRadius = 2000;
+let mapCenter = null;
+let isSearching = false;
+let autoCompleteTimeout = null;
+
+// ─── INIT MAP ─────────────────────────────────────────
+function initMap() {
+  map = L.map('map', { zoomControl: true }).setView([20.5937, 78.9629], 5);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '©OpenStreetMap ©CartoDB', maxZoom: 19
+  }).addTo(map);
+
+  map.on('click', async (e) => {
+    setMapCenter(e.latlng.lat, e.latlng.lng);
+    const name = await reverseGeocode(e.latlng.lat, e.latlng.lng);
+    document.getElementById('locationInput').value = name;
+    updateLocationBox(name, '', 0);
+  });
+}
+
+function setMapCenter(lat, lng, zoom) {
+  mapCenter = { lat, lng };
+  map.setView([lat, lng], zoom || map.getZoom());
+  drawRadius(lat, lng, currentRadius);
+}
+
+function drawRadius(lat, lng, r) {
+  if (radiusCircle) map.removeLayer(radiusCircle);
+  radiusCircle = L.circle([lat, lng], {
+    radius: r, color: '#06b6d4', fillColor: '#06b6d420', fillOpacity: 0.15, weight: 1.5
+  }).addTo(map);
+}
+
+// ─── LOCATION SEARCH ─────────────────────────────────
+function onLocationInput(val) {
+  clearTimeout(autoCompleteTimeout);
+  if (val.length < 2) { hideAutocomplete(); return; }
+  autoCompleteTimeout = setTimeout(() => fetchAutocomplete(val), 350);
+}
+
+async function fetchAutocomplete(q) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=7&addressdetails=1&accept-language=en`, {headers:{'Accept-Language':'en'}});
+    const data = await res.json();
+    showAutocomplete(data);
+  } catch(e) {}
+}
+
+function showAutocomplete(items) {
+  const list = document.getElementById('autocomplete-list');
+  if (!items.length) { list.classList.add('hidden'); return; }
+  list.innerHTML = items.map((item, i) => `
+    <button onclick="selectLocation(${parseFloat(item.lat)}, ${parseFloat(item.lon)}, \`${item.display_name.replace(/`/g,"'")}\`)"
+      class="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 flex items-start gap-2 border-b border-gray-700/50 last:border-0">
+      <svg class="mt-0.5 shrink-0" width="12" height="12" fill="none" stroke="#06b6d4" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+      <span class="truncate">${item.display_name}</span>
+    </button>
+  `).join('');
+  list.classList.remove('hidden');
+}
+
+function hideAutocomplete() {
+  document.getElementById('autocomplete-list').classList.add('hidden');
+}
+
+function selectLocation(lat, lng, name) {
+  hideAutocomplete();
+  document.getElementById('locationInput').value = name.split(',')[0];
+  setMapCenter(lat, lng, 14);
+  updateLocationBox(name.split(',')[0], name.split(',').slice(1,3).join(',').trim(), 0);
+}
+
+async function useMyLocation() {
+  if (!navigator.geolocation) return alert('Geolocation not supported');
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const { latitude: lat, longitude: lng } = pos.coords;
+    setMapCenter(lat, lng, 14);
+    const name = await reverseGeocode(lat, lng);
+    document.getElementById('locationInput').value = name;
+    updateLocationBox(name, '', 0);
+  }, () => alert('Could not get location'));
+}
+
+async function reverseGeocode(lat, lng) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`, {headers:{'Accept-Language':'en'}});
+    const d = await res.json();
+    return d.address?.city || d.address?.town || d.address?.village || d.display_name?.split(',')[0] || 'Unknown';
+  } catch { return 'Unknown'; }
+}
+
+// ─── RADIUS ───────────────────────────────────────────
+function setRadius(r) {
+  currentRadius = r;
+  document.querySelectorAll('.radius-btn').forEach(b => {
+    b.classList.remove('btn-primary','active-radius');
+    b.classList.add('btn-outline');
+  });
+  const active = document.querySelector(`.radius-btn[data-r="${r}"]`);
+  if (active) { active.classList.remove('btn-outline'); active.classList.add('btn-primary','active-radius'); }
+  if (mapCenter) drawRadius(mapCenter.lat, mapCenter.lng, r);
+}
+
+// ─── SEARCH ───────────────────────────────────────────
+async function doSearch() {
+  const keyword = document.getElementById('searchInput').value.trim();
+  if (!keyword) return alert('Please enter a business type');
+  if (!mapCenter) return alert('Please select a location first');
+
+  isSearching = true;
+  const searchBtn = document.getElementById('searchBtn');
+  searchBtn.innerHTML = '<span class="spinner"></span>';
+  searchBtn.disabled = true;
+  showStatus('🔍 Searching businesses...');
+
+  try {
+    // Ab 'apiKey' variable pass karne ki zarurat nahi, library script me already hai
+    businesses = await searchWithGoogle(keyword);
+    
+    const locName = document.getElementById('locationInput').value || 'area';
+    businesses = businesses.map(b => ({ ...b, city: locName, search_query: keyword }));
+
+    if (businesses.length) {
+      showStatus(`✅ ${businesses.length} businesses found`);
+      setTimeout(hideStatus, 3000);
+    } else {
+      showStatus('⚠️ No businesses found.');
+    }
+
+    updateStats();
+    updateBizList();
+    plotMarkers();
+    updateLocationBox(locName, '', businesses.length);
+    document.getElementById('exportBtn').disabled = businesses.length === 0;
+
+  } catch(e) {
+    console.error(e);
+    alert('Search failed: ' + e.message);
+    hideStatus();
+  } finally {
+    isSearching = false;
+    searchBtn.innerHTML = '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
+    searchBtn.disabled = false;
+  }
+}
+// ─── NAYA GOOGLE SEARCH FUNCTION (NO FETCH) ──────────
+async function searchWithGoogle(keyword) {
+  return new Promise((resolve, reject) => {
+    // Google Places Service initialize karein
+    const service = new google.maps.places.PlacesService(document.createElement('div'));
+    
+    const request = {
+      location: new google.maps.LatLng(mapCenter.lat, mapCenter.lng),
+      radius: currentRadius,
+      keyword: keyword
+    };
+
+    // Library ka direct method use karein (No CORS error)
+    service.nearbySearch(request, (results, status) => {
+      if (status === google.maps.places.PlacesServiceStatus.OK) {
+        resolve(results.map(p => ({
+          name: p.name,
+          address: p.vicinity || '',
+          category: (p.types?.[0] || keyword).replace(/_/g,' '),
+          rating: p.rating || null,
+          phone: '', 
+          website: '', 
+          email: '',
+          location_lat: p.geometry.location.lat(),
+          location_lng: p.geometry.location.lng(),
+        })));
+      } else {
+        reject(new Error('Google search failed: ' + status));
+      }
+    });
+  });
+}
+
+async function searchWithOverpass(keyword) {
+  const r = currentRadius;
+  const lat = mapCenter.lat, lng = mapCenter.lng;
+  const tagMap = {
+    restaurant: 'amenity=restaurant', cafe: 'amenity=cafe', hotel: 'tourism=hotel',
+    hospital: 'amenity=hospital', pharmacy: 'amenity=pharmacy', bank: 'amenity=bank',
+    gym: 'leisure=fitness_centre', shop: 'shop=*', salon: 'shop=hairdresser',
+    skin: 'shop=beauty', clinic: 'amenity=clinic', school: 'amenity=school',
+    supermarket: 'shop=supermarket', bakery: 'shop=bakery', bar: 'amenity=bar',
+    dental: 'amenity=dentist', doctor: 'amenity=doctors', spa: 'leisure=spa',
+  };
+  const kw = keyword.toLowerCase();
+  let tag = null;
+  for (const [k, v] of Object.entries(tagMap)) {
+    if (kw.includes(k)) { tag = v; break; }
+  }
+  if (!tag) return [];
+
+  const [key, val] = tag.split('=');
+  const query = val === '*'
+    ? `[out:json][timeout:25];(node["${key}"](around:${r},${lat},${lng});way["${key}"](around:${r},${lat},${lng}););out center 40;`
+    : `[out:json][timeout:25];(node["${key}"="${val}"](around:${r},${lat},${lng});way["${key}"="${val}"](around:${r},${lat},${lng}););out center 40;`;
+
+  const res = await fetch('https://overpass-api.de/api/interpreter', { method:'POST', body:'data='+encodeURIComponent(query) });
+  const data = await res.json();
+  return (data.elements || []).filter(e => e.tags?.name).map(e => ({
+    name: e.tags.name,
+    address: [e.tags['addr:street'], e.tags['addr:city']].filter(Boolean).join(', ') || '',
+    category: keyword,
+    rating: null,
+    phone: e.tags.phone || e.tags['contact:phone'] || '',
+    website: e.tags.website || e.tags['contact:website'] || '',
+    email: e.tags.email || e.tags['contact:email'] || '',
+    location_lat: e.lat || e.center?.lat || null,
+    location_lng: e.lon || e.center?.lon || null,
+  }));
+}
+
+async function searchWithNominatim(keyword) {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(keyword)}&lat=${mapCenter.lat}&lon=${mapCenter.lng}&radius=${currentRadius/1000}&format=json&limit=30&addressdetails=1&accept-language=en`;
+  const res = await fetch(url, {headers:{'Accept-Language':'en'}});
+  const data = await res.json();
+  return data.filter(d => d.display_name).map(d => ({
+    name: d.name || d.display_name.split(',')[0],
+    address: d.display_name.split(',').slice(1,4).join(',').trim(),
+    category: keyword,
+    rating: null, phone: '', website: '', email: '',
+    location_lat: parseFloat(d.lat),
+    location_lng: parseFloat(d.lon),
+  }));
+}
+
+// ─── MAP MARKERS ──────────────────────────────────────
+function plotMarkers() {
+  clearMarkers();
+  businesses.forEach((biz, i) => {
+    if (!biz.location_lat || !biz.location_lng) return;
+    const icon = L.divIcon({
+      html: `<div style="background:#06b6d4;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:bold;border:2px solid #fff;cursor:pointer;">${i+1}</div>`,
+      iconSize: [28,28], className: ''
+    });
+    const m = L.marker([biz.location_lat, biz.location_lng], {icon}).addTo(map);
+    m.bindPopup(`<b>${biz.name}</b><br>${biz.address || ''}<br>${biz.phone ? '📞 '+biz.phone : ''}<br>${biz.email ? '✉️ '+biz.email : ''}`);
+    markers.push(m);
+  });
+}
+
+function clearMarkers() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+}
+
+// ─── BUSINESS LIST ────────────────────────────────────
+function updateBizList() {
+  const container = document.getElementById('bizList');
+  if (!businesses.length) {
+    container.innerHTML = `<div class="flex flex-col items-center justify-center h-full text-gray-600 gap-3">
+      <svg width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <p class="text-sm">Search for businesses to get started</p></div>`;
+    document.getElementById('selectAllBar').classList.add('hidden');
+    return;
+  }
+
+  document.getElementById('selectAllBar').classList.remove('hidden');
+  container.innerHTML = businesses.map((biz, i) => `
+    <div class="biz-card bg-gray-800 border border-gray-700 rounded-xl p-3 mb-2 cursor-pointer ${selectedIds.has(i) ? 'border-cyan-500 bg-gray-700' : ''}" onclick="toggleSelect(${i})" id="card-${i}">
+      <div class="flex items-start gap-2">
+        <div class="mt-0.5 w-4 h-4 rounded border ${selectedIds.has(i) ? 'bg-cyan-500 border-cyan-500' : 'border-gray-500'} flex items-center justify-center shrink-0">
+          ${selectedIds.has(i) ? '<svg width="10" height="10" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-sm text-white truncate">${biz.name}</div>
+          ${biz.category ? `<span class="tag">${biz.category}</span>` : ''}
+          ${biz.rating ? `<span class="star text-xs">★ ${biz.rating}</span>` : ''}
+          ${biz.address ? `<div class="text-xs text-gray-400 truncate mt-1">📍 ${biz.address}</div>` : ''}
+          ${biz.phone ? `<div class="text-xs text-gray-400 mt-0.5">📞 ${biz.phone}</div>` : ''}
+          ${biz.email ? `<div class="text-xs text-cyan-400 mt-0.5 truncate">✉️ ${biz.email}</div>` : ''}
+          ${biz.website ? `<div class="text-xs text-blue-400 mt-0.5 truncate"><a href="${biz.website}" target="_blank" onclick="event.stopPropagation()">🌐 Website</a></div>` : ''}
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleSelect(i) {
+  if (selectedIds.has(i)) selectedIds.delete(i);
+  else selectedIds.add(i);
+  updateStats();
+  updateBizList();
+  const emailBtn = document.getElementById('emailBtn');
+  if (selectedIds.size > 0) {
+    emailBtn.classList.remove('hidden');
+    document.getElementById('emailBtnText').textContent = `Generate Emails (${selectedIds.size})`;
+  } else {
+    emailBtn.classList.add('hidden');
+  }
+}
+
+function toggleSelectAll() {
+  if (selectedIds.size === businesses.length) {
+    selectedIds.clear();
+  } else {
+    businesses.forEach((_, i) => selectedIds.add(i));
+  }
+  updateStats();
+  updateBizList();
+  const emailBtn = document.getElementById('emailBtn');
+  if (selectedIds.size > 0) {
+    emailBtn.classList.remove('hidden');
+    document.getElementById('emailBtnText').textContent = `Generate Emails (${selectedIds.size})`;
+  } else {
+    emailBtn.classList.add('hidden');
+  }
+}
+
+// ─── STATS ────────────────────────────────────────────
+function updateStats() {
+  document.getElementById('statFound').textContent = businesses.length;
+  document.getElementById('statEmails').textContent = businesses.filter(b => b.email).length;
+  document.getElementById('statSelected').textContent = selectedIds.size;
+}
+
+// ─── STATUS BAR ───────────────────────────────────────
+function showStatus(msg) {
+  const bar = document.getElementById('statusBar');
+  bar.innerHTML = `<span class="spinner"></span> <span style="margin-left:6px">${msg}</span>`;
+  bar.classList.remove('hidden');
+}
+function hideStatus() {
+  document.getElementById('statusBar').classList.add('hidden');
+}
+
+// ─── LOCATION BOX ─────────────────────────────────────
+function updateLocationBox(name, sub, count) {
+  document.getElementById('locationInfoBox').classList.remove('hidden');
+  document.getElementById('locationInfoName').textContent = name;
+  document.getElementById('locationInfoSub').textContent = sub || '';
+  document.getElementById('locationInfoCount').textContent = count ? `${count} businesses found` : '';
+}
+
+// ─── EXPORT CSV ───────────────────────────────────────
+function exportCSV() {
+  if (!businesses.length) return;
+  const rows = [
+    ['Business Name','Category','Address','Phone','Email','Website','Rating','City'],
+    ...businesses.map(b => [b.name||'',b.category||'',b.address||'',b.phone||'',b.email||'',b.website||'',b.rating||'',b.city||''])
+  ];
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `bizfinder-leads-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+// ─── EMAIL MODAL ──────────────────────────────────────
+function openEmailModal() {
+  document.getElementById('emailModal').classList.remove('hidden');
+  document.getElementById('emailResults').innerHTML = '';
+  const saved = localStorage.getItem('geminiKey');
+  if (saved) document.getElementById('geminiKey').value = saved;
+}
+function closeEmailModal() {
+  document.getElementById('emailModal').classList.add('hidden');
+}
+
+async function generateEmails() {
+  const product = document.getElementById('senderProduct').value.trim();
+  const sender = document.getElementById('senderName').value.trim();
+  const tone = document.getElementById('emailTone').value;
+  const apiKey = document.getElementById('geminiKey').value.trim();
+
+  if (!product || !sender) return alert('Please fill in your product and name');
+  if (!apiKey) return alert('Please enter your Gemini API key');
+
+  const selected = [...selectedIds].map(i => businesses[i]).filter(Boolean);
+  if (!selected.length) return alert('No businesses selected');
+
+  const btn = document.getElementById('genEmailBtn');
+  btn.innerHTML = '<span class="spinner"></span> Generating...';
+  btn.disabled = true;
+
+  const resultsDiv = document.getElementById('emailResults');
+  resultsDiv.innerHTML = '';
+
+  for (const biz of selected) {
+    try {
+      const prompt = `Write a ${tone} cold outreach email from "${sender}" offering "${product}" to the business "${biz.name}" (${biz.category || 'business'}) located at ${biz.city || 'their location'}.
+Keep it concise (under 120 words), personalized, and end with a clear CTA.
+Return JSON: {"subject": "...", "body": "..."}`;
+
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const match = text.match(/\{[\s\S]*\}/);
+      const parsed = match ? JSON.parse(match[0]) : { subject: 'Hello from '+sender, body: text };
+
+      resultsDiv.innerHTML += `
+        <div class="bg-gray-900 border border-gray-700 rounded-xl p-4 space-y-2">
+          <div class="font-semibold text-cyan-400 text-sm">${biz.name} ${biz.email ? `<span class="text-gray-400 font-normal">(${biz.email})</span>` : ''}</div>
+          <div class="text-xs text-gray-400">Subject: <span class="text-white font-medium">${parsed.subject}</span>
+            <span class="copy-btn ml-2" onclick="copyText('${parsed.subject.replace(/'/g,"\\'")}')">copy</span>
+          </div>
+          <div class="text-xs text-gray-300 whitespace-pre-wrap bg-gray-800 rounded-lg p-3">${parsed.body}</div>
+          <button onclick="copyText(\`${parsed.body.replace(/`/g,"\\`")}\`)" class="copy-btn text-xs">📋 Copy Email Body</button>
+        </div>`;
+    } catch(e) {
+      resultsDiv.innerHTML += `<div class="text-xs text-red-400 bg-red-900/20 border border-red-800/40 rounded-lg px-3 py-2">${biz.name}: ${e.message}</div>`;
+    }
+  }
+
+  btn.innerHTML = '⚡ Generate Cold Emails for Selected Businesses';
+  btn.disabled = false;
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    const el = document.createElement('div');
+    el.textContent = '✅ Copied!';
+    el.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#06b6d4;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;z-index:9999';
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 2000);
+  });
+}
+
+function saveApiKey(v) { localStorage.setItem('gmapsKey', v); }
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+}
+
+// Close autocomplete on outside click
+document.addEventListener('click', e => {
+  if (!e.target.closest('#locationInput') && !e.target.closest('#autocomplete-list')) hideAutocomplete();
+});
+
+// Close modal on overlay click
+document.getElementById('emailModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('emailModal')) closeEmailModal();
+});
+
+// Restore saved API keys
+window.addEventListener('load', () => {
+  const saved = localStorage.getItem('gmapsKey');
+  if (saved) document.getElementById('apiKeyInput').value = saved;
+  initMap();
+});
+</script>
+</body>
+</html>
